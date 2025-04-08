@@ -50,3 +50,20 @@ class ResultUploadForm(FlaskForm):
         FileAllowed(['csv'], 'CSV files only!')
     ])
     submit = SubmitField('Upload Results')
+
+class StudyMaterialForm(FlaskForm):
+    department_id = SelectField('Department', validators=[DataRequired()], choices=[
+        ('1', 'Information and Communication Technology'),
+        ('2', 'Information Technology'),
+        ('3', 'Civil Engineering'),
+        ('4', 'Mechanical Engineering'),
+        ('5', 'Electrical Engineering'),
+        ('6', 'Electronics and Communication Engineering')
+    ])
+    semester = SelectField('Semester', validators=[DataRequired()], choices=[(str(i), f'Semester {i}') for i in range(1, 7)])
+    subject_id = SelectField('Subject', validators=[DataRequired()])
+    file = FileField('File', validators=[
+        FileRequired(),
+        FileAllowed(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'zip'], 'Allowed file types: PDF, DOC, DOCX, PPT, PPTX, ZIP')
+    ])
+    submit = SubmitField('Upload Material')

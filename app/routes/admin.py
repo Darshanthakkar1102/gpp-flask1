@@ -1,16 +1,18 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
-from flask_security import roles_required, current_user, login_required
+from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify, current_app
+from flask_security import roles_required, roles_accepted, current_user, login_required
 from flask_security.utils import hash_password
 from ..models.user import User, Role
 from ..models.department import Department
 from ..models.project import Project
 from ..models.result import Result
+from ..models.subject import Subject
+from ..models.study_material import StudyMaterial
 from ..forms.admin import UserCreationForm, BulkUserUploadForm, ResultUploadForm
+from ..forms.study_material import StudyMaterialForm
 from ..extensions import db
 from datetime import datetime
 import pandas as pd
 import os
-from flask import current_app
 
 bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -630,3 +632,127 @@ def view_result_details(student_id, exam_id):
         abort(403)
     
     return render_template('admin/result_details.html', result=result)
+
+@bp.route('/get_semesters/<int:dept_id>')
+@roles_required('admin')
+def get_semesters(dept_id):
+    # Get unique semesters for the department from subjects
+    semesters = db.session.query(Subject.semester)\
+        .filter(Subject.department_id == dept_id)\
+        .distinct()\
+        .order_by(Subject.semester)\
+        .all()
+    return jsonify([sem[0] for sem in semesters])
+
+@bp.route('/get_subjects/<int:dept_id>/<int:semester>')
+@login_required
+def get_subjects(dept_id, semester):
+    # Get unique subjects to avoid duplicates
+    subjects = Subject.query\
+        .filter_by(department_id=dept_id, semester=semester)\
+        .distinct(Subject.code)\
+        .order_by(Subject.name)\
+        .all()
+    return jsonify([{'id': s.id, 'name': s.name, 'code': s.code} for s in subjects])
+
+@bp.route('/study_materials')
+@login_required
+@roles_accepted('admin', 'faculty')
+def study_materials():
+    # Create form instance
+    form = StudyMaterialForm()
+    
+    # Set choices for department dropdown
+    departments = Department.query.all()
+    form.department_id.choices = [(d.id, d.name) for d in departments]
+    
+    # Initialize subject choices as empty list
+    form.subject_id.choices = []
+    
+    # Get all study materials
+    materials = StudyMaterial.query.all()
+    
+    return render_template('admin/tabs/study_materials.html', 
+                         form=form,
+                         materials=materials)
+
+@bp.route('/upload_study_material', methods=['POST'])
+@login_required
+@roles_accepted('admin', 'faculty')
+def upload_study_material():
+    form = StudyMaterialForm(request.form)
+    
+    # Set choices for department dropdown
+    departments = Department.query.all()
+    form.department_id.choices = [(d.id, d.name) for d in departments]
+    
+    # Set choices for subject dropdown based on selected department and semester
+    if form.department_id.data and form.semester.data:
+        subjects = Subject.query.filter_by(
+            department_id=form.department_id.data,
+            semester=form.semester.data
+        ).all()
+        form.subject_id.choices = [(s.id, s.name) for s in subjects]
+    else:
+        form.subject_id.choices = []
+    
+    if form.validate_on_submit():
+        department_id = form.department_id.data
+        semester = form.semester.data
+        subject_id = form.subject_id.data
+        file = request.files['file']
+        
+        if not all([department_id, semester, subject_id, file]):
+            flash('All fields are required', 'error')
+            return redirect(url_for('admin.study_materials'))
+        
+        if file:
+            # Create uploads directory if it doesn't exist
+            upload_dir = os.path.join(current_app.config['UPLOAD_FOLDER'], 'study_materials')
+            os.makedirs(upload_dir, exist_ok=True)
+            
+            # Save file
+            filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
+            file_path = os.path.join(upload_dir, filename)
+            file.save(file_path)
+            
+            # Create study material record
+            material = StudyMaterial(
+                semester=semester,
+                department_id=department_id,
+                subject_id=subject_id,
+                file_path=filename,
+                uploaded_by=current_user.id
+            )
+            db.session.add(material)
+            db.session.commit()
+            
+            flash('Study material uploaded successfully', 'success')
+        else:
+            flash('Please select a file to upload', 'error')
+        
+        return redirect(url_for('admin.study_materials'))
+    
+    return render_template('admin/tabs/study_materials.html', form=form)
+
+@bp.route('/delete_study_material/<int:material_id>', methods=['POST'])
+@login_required
+def delete_study_material(material_id):
+    material = StudyMaterial.query.get_or_404(material_id)
+    
+    # Only allow faculty members to delete their own uploads or admins to delete any
+    if not current_user.has_role('admin') and material.uploaded_by != current_user.id:
+        flash('You can only delete your own uploaded materials.', 'error')
+        return redirect(url_for('admin.study_materials'))
+    
+    # Delete file
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], 'study_materials', material.file_path)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    
+    # Delete database record
+    db.session.delete(material)
+    db.session.commit()
+    
+    flash('Study material deleted successfully', 'success')
+    return redirect(url_for('admin.study_materials'))

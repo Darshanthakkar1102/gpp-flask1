@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Study Materials</h2>
+    <div class="card">
+        <div class="card-header">
+            <h4>Available Study Materials</h4>
+            <small class="text-muted">For {{ current_user.department.name }} - Semester {{ current_user.semester }}</small>
+        </div>
+        <div class="card-body">
+            {% if materials %}
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Subject</th>
+                            <th>File</th>
+                            <th>Uploaded By</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for material in materials %}
+                        <tr>
+                            <td>{{ material.subject.name }}</td>
+                            <td>{{ material.file_path }}</td>
+                            <td>{{ material.uploader.email }}</td>
+                            <td>
+                                <a href="{{ url_for('student.download_material', material_id=material.id) }}" 
+                                   class="btn btn-sm btn-success">
+                                    <i class="fas fa-download"></i> Download
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-info">
+                No study materials available for your department and semester yet.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
